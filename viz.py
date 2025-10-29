@@ -1,5 +1,5 @@
 # viz.py
-# Complete Plotly animation builder + layout helper for non-animated previews.
+# Plotly animation builder + layout helper (safe w/ empty frames; no .append on fig.frames)
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -87,7 +87,7 @@ def build_plotly_animation(frames, shapes, labels):
         )]
     )
 
-    # Initial traces (even if empty)
+    # Initial traces (fallback to a tiny dummy if needed)
     if len(frames):
         df0 = frames[0]
     else:
@@ -102,8 +102,8 @@ def build_plotly_animation(frames, shapes, labels):
             hovertemplate="%{text}<br>(%{x:.1f}, %{y:.1f})<extra></extra>",
         ))
 
-    # Animation frames
-    fig.frames = []
+    # Build the full frame list, then assign once (no append!)
+    frame_list = []
     for k, df in enumerate(frames):
         data = []
         for typ, size in [("truck", 18), ("forklift", 10), ("picker", 8)]:
@@ -114,6 +114,8 @@ def build_plotly_animation(frames, shapes, labels):
                 marker=dict(size=size), name=typ.capitalize(),
                 hovertemplate="%{text}<br>(%{x:.1f}, %{y:.1f})<extra></extra>",
             ))
-        fig.frames.append(go.Frame(data=data, name=str(k)))
+        frame_list.append(go.Frame(data=data, name=str(k)))
+
+    fig.frames = tuple(frame_list)  # assign once; frames is a property
 
     return fig
