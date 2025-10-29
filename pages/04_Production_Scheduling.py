@@ -1,16 +1,21 @@
 # pages/04_Production_Scheduling.py
 # Production & Assembly Line with machine breakdowns & a single repairman (preemptive)
+
 import math, random
 import numpy as np
 import pandas as pd
 import simpy
 import streamlit as st
 
+# ❗ Must be the first Streamlit call:
+st.set_page_config(page_title="Production & Assembly (SimPy)", layout="wide")
+
+# (CSS fix for sidebar scroll)
 st.markdown(
     "<style>section[data-testid='stSidebar'] > div {height:100vh; overflow-y:auto;}</style>",
     unsafe_allow_html=True,
 )
-st.set_page_config(page_title="Production & Assembly (SimPy)", layout="wide")
+
 st.title("Production & Assembly Line (SimPy)")
 
 with st.expander("What this solves & how to run", expanded=True):
