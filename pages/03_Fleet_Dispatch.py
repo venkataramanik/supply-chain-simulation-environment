@@ -1,18 +1,21 @@
 # pages/03_Fleet_Dispatch.py
 # Transportation & Fleet Flow simulation (fleet dispatch & on-time performance)
+
 import math, random
 import numpy as np
 import pandas as pd
 import simpy
 import streamlit as st
 
-# --- Sidebar scrollbar fix ---
+# ❗ Must be the first Streamlit call:
+st.set_page_config(page_title="Fleet Dispatch (SimPy)", layout="wide")
+
+# (CSS fix for sidebar scroll)
 st.markdown(
     "<style>section[data-testid='stSidebar'] > div {height:100vh; overflow-y:auto;}</style>",
     unsafe_allow_html=True,
 )
 
-st.set_page_config(page_title="Fleet Dispatch (SimPy)", layout="wide")
 st.title("Transportation & Fleet Flow (SimPy)")
 
 with st.expander("What this solves & how to run", expanded=True):
