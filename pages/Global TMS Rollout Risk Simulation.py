@@ -8,19 +8,25 @@ import matplotlib.pyplot as plt
 # A. SIMULATION CONTROLS (THE STREAMLIT SIDEBAR)
 # ====================================================================
 
-# Define constants outside of the sidebar controls (fixed for the model)
+# Define constants 
 SIM_DURATION = 5 * 365 # 5 years in days
 TARGET_COST_MAX = 6_000_000 # Max budget for cost overrun analysis (USD)
 TARGET_ROI_MIN = 0.50 # Minimum acceptable ROI (50%)
 
-# Use st.sidebar for the simulation controls
+# Set up the interactive controls in the sidebar
 with st.sidebar:
     st.title("⚙️ Simulation Controls")
     
     # 1. Project Parameters & Resources
     st.subheader("Project & Resource Capacity")
-    NUM_SIMULATIONS = st.number_input("Monte Carlo Runs", min_value=100, max_value=10000, value=5000, step=1000)
-    GIT_TEAM_CAPACITY = st.number_input("Global Integration Team Size", min_value=1, max_value=10, value=4, step=1)
+    # Use st.cache_data to ensure Streamlit reruns the heavy simulation only when these inputs change
+    @st.cache_data
+    def get_user_inputs():
+        num_simulations = st.number_input("Monte Carlo Runs", min_value=100, max_value=10000, value=5000, step=1000)
+        git_team_capacity = st.number_input("Global Integration Team Size", min_value=1, max_value=10, value=4, step=1)
+        return num_simulations, git_team_capacity
+
+    NUM_SIMULATIONS, GIT_TEAM_CAPACITY = get_user_inputs()
     
     # 2. Risk Controls
     st.subheader("Risk Mitigation Levers")
@@ -33,7 +39,7 @@ with st.sidebar:
 # B. MONTE CARLO INPUT DISTRIBUTIONS (RISK PARAMETERS)
 # ====================================================================
 
-# Project Execution Risks
+# Project Execution Risks (Min, Mode, Max)
 T1_DURATION = (60, 90, 120)       
 ROLLOUT_TIME_BASE = (90, 150, 240)
 COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
@@ -42,15 +48,16 @@ COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
 CURRENCY_FLUCTUATION_DIST = (-0.10, 0.0, 0.20)
 RESISTANCE_DELAY_FACTOR = (1.0, 1.15, 1.40)
 
-# Data Risks (Using interactive control for the maximum of the triangular distribution)
+# Data Risks
 DATA_DELAY_DAYS = (5, 10, 30)
 DATA_CLEANUP_COST = (20000, 50000, 100000)
-INTEGRATION_DIFFICULTY_FACTOR_DIST = (1.0, 1.2, INTEGRATION_DIFFICULTY_FACTOR_MAX) # Linked to sidebar
+# This distribution will be updated based on the sidebar slider
+INTEGRATION_DIFFICULTY_FACTOR_DIST = (1.0, 1.2, INTEGRATION_DIFFICULTY_FACTOR_MAX) 
 
 # ROI/Financial Risks
 TARGET_ANNUAL_SAVINGS = 800000
 RATE_VOLATILITY_FACTOR = (0.9, 1.0, 1.2)
-CARRIER_PENALTY_DAYS = (10, 20, 50) # Days penalty if non-compliance occurs
+CARRIER_PENALTY_DAYS = (10, 20, 50) 
 
 # Regional Profiles 
 REGIONS = {
@@ -66,11 +73,12 @@ ROLLOUT_ORDER = ['NA', 'EMEA', 'APAC', 'LATAM']
 # ====================================================================
 
 class TMSRollout:
-    def __init__(self, env):
+    def __init__(self, env, git_capacity, carrier_prob, integration_max):
         self.env = env
         self.total_cost_usd = 0.0
-        # The core resource that dictates sequential flow: the Global Integration Team
-        self.git_team = simpy.Resource(env, capacity=GIT_TEAM_CAPACITY)
+        self.git_team = simpy.Resource(env, capacity=git_capacity)
+        self.carrier_prob = carrier_prob
+        self.integration_dist = (1.0, 1.2, integration_max)
         self.env.process(self.run_project())
 
     def run_project(self):
@@ -93,11 +101,11 @@ class TMSRollout:
         rollout_time = np.random.triangular(*ROLLOUT_TIME_BASE)
         
         # Operational Risk: Integration and Data Challenges
-        integration_factor = np.random.triangular(*INTEGRATION_DIFFICULTY_FACTOR_DIST)
+        integration_factor = np.random.triangular(*self.integration_dist)
         data_delay = np.random.triangular(*DATA_DELAY_DAYS)
         rollout_time = rollout_time * integration_factor + data_delay
         
-        # Multinational Risk: Compliance and Resistance
+        # Multinational Risk: Resistance
         resistance_factor = np.random.triangular(*RESISTANCE_DELAY_FACTOR)
         compliance_delay = np.random.triangular(*region_data['compliance_risk'])
         rollout_time = rollout_time * resistance_factor + compliance_delay
@@ -114,7 +122,7 @@ class TMSRollout:
             yield self.env.timeout(rollout_time)
 
             # 3. Transportation Risk: Carrier Non-Compliance Check (Stochastic Event)
-            if random.random() < PROB_CARRIER_NON_COMPLIANCE:
+            if random.random() < self.carrier_prob:
                 penalty_time = np.random.triangular(*CARRIER_PENALTY_DAYS)
                 yield self.env.timeout(penalty_time) # Non-compliance forces a delay
 
@@ -131,21 +139,19 @@ class TMSRollout:
 # D. MONTE CARLO DRIVER AND ANALYSIS
 # ====================================================================
 
-# Use st.cache_data to run the simulation only when inputs change
 @st.cache_data
 def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max):
     ALL_PROJECT_DURATIONS = []
     ALL_PROJECT_COSTS = []
     ANNUAL_SAVINGS_RISKED = []
-
-    # Re-define INTEGRATION_DIFFICULTY_FACTOR_DIST inside function for caching
-    local_integration_dist = (1.0, 1.2, integration_max) 
     
+    # Re-evaluate the integration factor distribution for this run
+    INTEGRATION_DIFFICULTY_FACTOR_DIST = (1.0, 1.2, integration_max) 
+
     for i in range(num_runs):
-        # Pass the global parameters as constants to the class initialization or use global scope carefully
-        # For simplicity and given the script structure, we'll keep the required variables defined above/used implicitly
         env = simpy.Environment()
-        project = TMSRollout(env)
+        # Initialize project with user inputs
+        project = TMSRollout(env, git_capacity, carrier_prob, integration_max)
         env.run(until=SIM_DURATION + 1000)
         
         # Collect results
@@ -157,7 +163,7 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
         realized_savings = TARGET_ANNUAL_SAVINGS / rate_factor
         ANNUAL_SAVINGS_RISKED.append(realized_savings)
 
-    # --- Calculations ---
+    # --- Metrics Calculation ---
     DURATIONS = np.array(ALL_PROJECT_DURATIONS)
     COSTS = np.array(ALL_PROJECT_COSTS)
     SAVINGS = np.array(ANNUAL_SAVINGS_RISKED)
@@ -168,6 +174,7 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
     for i in range(num_runs):
         total_savings = SAVINGS[i] * PROJECT_LIFE_YEARS
         total_project_cost = COSTS[i]
+        # ROI formula: (Total Savings - Total Cost) / Total Cost
         roi = (total_savings - total_project_cost) / total_project_cost
         ALL_ROIS.append(roi)
     ROIS = np.array(ALL_ROIS)
@@ -177,6 +184,7 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
     P_SUCCESS_COST = np.sum(COSTS <= TARGET_COST_MAX) / num_runs
     P_SUCCESS_ROI = np.sum(ROIS >= TARGET_ROI_MIN) / num_runs
 
+    # Percentiles (P90 for Cost/Duration, P10 for ROI)
     P90_DURATION = np.percentile(DURATIONS, 90) 
     P90_COST = np.percentile(COSTS, 90)       
     P10_ROI = np.percentile(ROIS, 10) 
@@ -194,16 +202,16 @@ DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCE
 
 st.title("🌍 Global TMS Rollout Risk Analysis")
 st.markdown(f"**Running {NUM_SIMULATIONS} Monte Carlo scenarios.** Adjust controls in the sidebar to test mitigation strategies.")
-st.header("1. Critical Risk Metrics")
 
 # --- 1. Display Key Metrics (st.metric) ---
 
+st.header("1. Critical Risk Metrics")
 col1, col2, col3 = st.columns(3)
 
 # Schedule Risk Card
 col1.subheader("Schedule Risk")
 col1.metric("90th Percentile Duration", f"{P90_DURATION/365:.2f} years", f"{100 * (1 - P_SUCCESS_TIME):.2f}% risk of overrun")
-col1.caption(f"Target: {SIM_DURATION/365:.1f} years")
+col1.caption(f"Target: {SIM_DURATION/365:.1f} years (5 years)")
 
 # Cost Risk Card
 col2.subheader("Cost Risk")
@@ -220,10 +228,8 @@ st.markdown("---")
 # --- 2. Chart the Results (st.pyplot) ---
 
 st.header("2. Risk Distribution Visuals")
-
-
-# CRITICAL FIX: Create the figure object first
-fig, axs = plt.subplots(1, 3, figsize=(18, 5)) # Increased width for better viewing
+# Create a single Matplotlib figure object
+fig, axs = plt.subplots(1, 3, figsize=(18, 5)) 
 
 # 1. Duration Histogram (axs[0])
 axs[0].hist(DURATIONS/365, bins=30, color='skyblue', edgecolor='black')
@@ -255,9 +261,3 @@ plt.tight_layout()
 
 # CRITICAL FIX: Pass the entire figure object to Streamlit to display it
 st.pyplot(fig)
-
----
-The video [Build Simulation Web Apps in Python: SimPy + Streamlit Deployment Masterclass (GitHub Template)](https://www.youtube.com/watch?v=2rDdNpBZ5ZA) demonstrates how to properly integrate a SimPy simulation model into a deployable web app using Streamlit, which is necessary for visualizing the output of this single script.
-
-
-http://googleusercontent.com/youtube_content/2
