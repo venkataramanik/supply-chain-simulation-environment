@@ -27,10 +27,10 @@ Instead of relying on a single, optimistic plan, we use the **Monte Carlo method
 
 # Define global constants (non-widget, non-distribution)
 SIM_DURATION = 5 * 365 # 5 years in days
-# CRITICAL FIX: Set a more challenging, realistic cost target
-TARGET_COST_MAX = 3_000_000 # Max budget for cost overrun analysis (USD)
-# CRITICAL FIX: Set a more challenging, realistic ROI target
-TARGET_ROI_MIN = 0.50 # Minimum acceptable ROI (50%)
+# Set a challenging, realistic cost target
+TARGET_COST_MAX = 3_000_000 
+# Set a challenging, realistic ROI target
+TARGET_ROI_MIN = 0.50 
 
 with st.sidebar:
     st.title("⚙️ Simulation Controls")
@@ -51,7 +51,7 @@ with st.sidebar:
 # C. MONTE CARLO INPUT DISTRIBUTIONS (FIXED RISK PARAMETERS)
 # ====================================================================
 
-# These distributions are fixed and do not rely on sidebar widgets
+# These distributions are fixed and will now be explicitly passed to the cached function
 T1_DURATION = (60, 90, 120)       
 ROLLOUT_TIME_BASE = (90, 150, 240)
 COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
@@ -76,48 +76,49 @@ ROLLOUT_ORDER = ['NA', 'EMEA', 'APAC', 'LATAM']
 # ====================================================================
 
 class TMSRollout:
-    def __init__(self, env, git_capacity, carrier_prob, integration_max):
+    def __init__(self, env, git_capacity, carrier_prob, integration_max, fixed_params):
         self.env = env
         self.total_cost_usd = 0.0
         self.git_team = simpy.Resource(env, capacity=git_capacity)
         self.carrier_prob = carrier_prob
         self.integration_dist = (1.0, 1.2, integration_max) 
+        self.fixed = fixed_params # Store all fixed distributions here
         self.env.process(self.run_project())
 
     def run_project(self):
         base_cost_setup = 500000 
-        setup_time = np.random.triangular(*T1_DURATION)
+        setup_time = np.random.triangular(*self.fixed['T1_DURATION'])
         yield self.env.timeout(setup_time)
-        cost_factor = np.random.triangular(*COST_OVERRUN_DIST)
+        cost_factor = np.random.triangular(*self.fixed['COST_OVERRUN_DIST'])
         self.total_cost_usd += base_cost_setup * (1 + cost_factor)
-        for region_key in ROLLOUT_ORDER:
+        for region_key in self.fixed['ROLLOUT_ORDER']:
             yield self.env.process(self.regional_rollout(region_key))
 
     def regional_rollout(self, region_key):
-        region_data = REGIONS[region_key]
-        rollout_time = np.random.triangular(*ROLLOUT_TIME_BASE)
+        region_data = self.fixed['REGIONS'][region_key]
+        rollout_time = np.random.triangular(*self.fixed['ROLLOUT_TIME_BASE'])
         
         integration_factor = np.random.triangular(*self.integration_dist)
-        data_delay = np.random.triangular(*DATA_DELAY_DAYS)
+        data_delay = np.random.triangular(*self.fixed['DATA_DELAY_DAYS'])
         rollout_time = rollout_time * integration_factor + data_delay
         
-        resistance_factor = np.random.triangular(*RESISTANCE_DELAY_FACTOR)
+        resistance_factor = np.random.triangular(*self.fixed['RESISTANCE_DELAY_FACTOR'])
         compliance_delay = np.random.triangular(*region_data['compliance_risk'])
         rollout_time = rollout_time * resistance_factor + compliance_delay
 
-        data_cost = np.random.triangular(*DATA_CLEANUP_COST)
+        data_cost = np.random.triangular(*self.fixed['DATA_CLEANUP_COST'])
         self.total_cost_usd += data_cost
 
         with self.git_team.request() as req:
             yield req
             yield self.env.timeout(rollout_time)
             if random.random() < self.carrier_prob:
-                penalty_time = np.random.triangular(*CARRIER_PENALTY_DAYS)
+                penalty_time = np.random.triangular(*self.fixed['CARRIER_PENALTY_DAYS'])
                 yield self.env.timeout(penalty_time)
 
         base_cost_region = 200000 * region_data['complexity']
-        cost_overrun = np.random.triangular(*COST_OVERRUN_DIST)
-        currency_factor = np.random.triangular(*CURRENCY_FLUCTUATION_DIST) 
+        cost_overrun = np.random.triangular(*self.fixed['COST_OVERRUN_DIST'])
+        currency_factor = np.random.triangular(*self.fixed['CURRENCY_FLUCTUATION_DIST']) 
         final_regional_cost = base_cost_region * (1 + cost_overrun) * (1 + currency_factor)
         self.total_cost_usd += final_regional_cost
 
@@ -126,22 +127,40 @@ class TMSRollout:
 # E. MONTE CARLO DRIVER AND ANALYSIS - CACHED FIX APPLIED
 # ====================================================================
 
+# Assemble fixed parameters into a single dictionary for clean passing
+FIXED_PARAMS = {
+    'T1_DURATION': T1_DURATION,
+    'ROLLOUT_TIME_BASE': ROLLOUT_TIME_BASE,
+    'COST_OVERRUN_DIST': COST_OVERRUN_DIST,
+    'CURRENCY_FLUCTUATION_DIST': CURRENCY_FLUCTUATION_DIST,
+    'RESISTANCE_DELAY_FACTOR': RESISTANCE_DELAY_FACTOR,
+    'DATA_DELAY_DAYS': DATA_DELAY_DAYS,
+    'DATA_CLEANUP_COST': DATA_CLEANUP_COST,
+    'RATE_VOLATILITY_FACTOR': RATE_VOLATILITY_FACTOR,
+    'CARRIER_PENALTY_DAYS': CARRIER_PENALTY_DAYS,
+    'REGIONS': REGIONS,
+    'ROLLOUT_ORDER': ROLLOUT_ORDER,
+    'TARGET_ANNUAL_SAVINGS': TARGET_ANNUAL_SAVINGS,
+}
+
+# ALL arguments (including fixed ones) are now passed explicitly to ensure caching works.
 @st.cache_data
-def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max):
+def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max, fixed_params):
     ALL_PROJECT_DURATIONS = []
     ALL_PROJECT_COSTS = []
     ANNUAL_SAVINGS_RISKED = []
 
     for i in range(num_runs):
         env = simpy.Environment()
-        project = TMSRollout(env, git_capacity, carrier_prob, integration_max)
+        # Pass fixed parameters to TMSRollout
+        project = TMSRollout(env, git_capacity, carrier_prob, integration_max, fixed_params)
         env.run(until=SIM_DURATION + 1000)
         
         ALL_PROJECT_DURATIONS.append(env.now)
         ALL_PROJECT_COSTS.append(project.total_cost_usd)
         
-        rate_factor = np.random.triangular(*RATE_VOLATILITY_FACTOR)
-        realized_savings = TARGET_ANNUAL_SAVINGS / rate_factor
+        rate_factor = np.random.triangular(*fixed_params['RATE_VOLATILITY_FACTOR'])
+        realized_savings = fixed_params['TARGET_ANNUAL_SAVINGS'] / rate_factor
         ANNUAL_SAVINGS_RISKED.append(realized_savings)
 
     # --- Metrics Calculation ---
@@ -154,7 +173,6 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
     for i in range(num_runs):
         total_savings = SAVINGS[i] * PROJECT_LIFE_YEARS
         total_project_cost = COSTS[i]
-        # ROI formula: (Total Savings - Total Cost) / Total Cost
         roi = (total_savings - total_project_cost) / total_project_cost
         ALL_ROIS.append(roi)
     ROIS = np.array(ALL_ROIS)
@@ -169,12 +187,13 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
 
     return DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCESS_COST, P_SUCCESS_ROI
 
-# Call the function, passing ALL widget outputs. This is the dependency list for caching.
+# Call the function, passing ALL widget outputs AND the fixed parameters.
 DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCESS_COST, P_SUCCESS_ROI = run_monte_carlo_simulation(
     NUM_SIMULATIONS, 
     GIT_TEAM_CAPACITY, 
     PROB_CARRIER_NON_COMPLIANCE, 
-    INTEGRATION_DIFFICULTY_FACTOR_MAX
+    INTEGRATION_DIFFICULTY_FACTOR_MAX,
+    FIXED_PARAMS # Explicitly pass the fixed distributions
 )
 
 # ====================================================================
@@ -195,13 +214,12 @@ col1.metric("90th Percentile Duration", f"{P90_DURATION/365:.2f} years", f"{100 
 col1.caption(f"Target: {SIM_DURATION/365:.1f} years (5 years)")
 
 col2.subheader("Cost Risk")
-# Risk value update should now be instantaneous when a sidebar value changes
 col2.metric("90th Percentile Cost", f"${P90_COST/1000000:.2f}M", f"{100 * (1 - P_SUCCESS_COST):.2f}% risk of overrun")
 col2.caption(f"Target: ${TARGET_COST_MAX/1000000:.1f}M")
 
 col3.subheader("Financial Risk")
 col3.metric("10th Percentile ROI", f"{P10_ROI:.2f}", f"{100 * (1 - P_SUCCESS_ROI):.2f}% risk of failure")
-col3.caption(f"Target Min ROI: {TARGET_ROI_MIN:.0f}")
+col3.caption(f"Target Min ROI: {TARGET_ROI_MIN:.2f}")
 
 st.markdown("---")
 
