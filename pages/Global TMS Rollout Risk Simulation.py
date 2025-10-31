@@ -26,13 +26,12 @@ Instead of relying on a single, optimistic plan, we use the **Monte Carlo method
 # ====================================================================
 
 # Define constants
-SIM_DURATION = 5 * 365 # 5 years in days
-TARGET_COST_MAX = 6_000_000 # Max budget for cost overrun analysis (USD)
-TARGET_ROI_MIN = 0.50 # Minimum acceptable ROI (50%)
+SIM_DURATION = 5 * 365 
+TARGET_COST_MAX = 6_000_000 
+TARGET_ROI_MIN = 0.50 
 
-# Set up the interactive controls in the sidebar
 with st.sidebar:
-    st.title("⚙️ Simulation Controls")
+    st.title("Simulation Controls")
     
     # --- 1. Project Parameters & Resources (Widgets) ---
     st.subheader("Project & Resource Capacity")
@@ -50,7 +49,6 @@ with st.sidebar:
 # C. MONTE CARLO INPUT DISTRIBUTIONS (RISK PARAMETERS)
 # ====================================================================
 
-# These are the statistical distributions for the risks (Triangular: Min, Mode, Max)
 T1_DURATION = (60, 90, 120)       
 ROLLOUT_TIME_BASE = (90, 150, 240)
 COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
@@ -96,12 +94,10 @@ class TMSRollout:
         region_data = REGIONS[region_key]
         rollout_time = np.random.triangular(*ROLLOUT_TIME_BASE)
         
-        # Operational Risk: Integration and Data Challenges
         integration_factor = np.random.triangular(*self.integration_dist)
         data_delay = np.random.triangular(*DATA_DELAY_DAYS)
         rollout_time = rollout_time * integration_factor + data_delay
         
-        # Multinational Risk: Resistance
         resistance_factor = np.random.triangular(*RESISTANCE_DELAY_FACTOR)
         compliance_delay = np.random.triangular(*region_data['compliance_risk'])
         rollout_time = rollout_time * resistance_factor + compliance_delay
@@ -112,12 +108,10 @@ class TMSRollout:
         with self.git_team.request() as req:
             yield req
             yield self.env.timeout(rollout_time)
-            # Carrier Non-Compliance check
             if random.random() < self.carrier_prob:
                 penalty_time = np.random.triangular(*CARRIER_PENALTY_DAYS)
                 yield self.env.timeout(penalty_time)
 
-        # Regional Cost Calculation
         base_cost_region = 200000 * region_data['complexity']
         cost_overrun = np.random.triangular(*COST_OVERRUN_DIST)
         currency_factor = np.random.triangular(*CURRENCY_FLUCTUATION_DIST) 
@@ -129,7 +123,6 @@ class TMSRollout:
 # E. MONTE CARLO DRIVER AND ANALYSIS - CACHED
 # ====================================================================
 
-# This function is cached: it only reruns when inputs change, saving time.
 @st.cache_data
 def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max):
     ALL_PROJECT_DURATIONS = []
@@ -138,14 +131,12 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
 
     for i in range(num_runs):
         env = simpy.Environment()
-        # Initialize project with user inputs
         project = TMSRollout(env, git_capacity, carrier_prob, integration_max)
         env.run(until=SIM_DURATION + 1000)
         
         ALL_PROJECT_DURATIONS.append(env.now)
         ALL_PROJECT_COSTS.append(project.total_cost_usd)
         
-        # Financial Risk: Calculate Realized Savings
         rate_factor = np.random.triangular(*RATE_VOLATILITY_FACTOR)
         realized_savings = TARGET_ANNUAL_SAVINGS / rate_factor
         ANNUAL_SAVINGS_RISKED.append(realized_savings)
@@ -183,8 +174,8 @@ DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCE
 # F. STREAMLIT DASHBOARD OUTPUT
 # ====================================================================
 
-st.title("🌍 Global TMS Rollout Risk Analysis")
-st.markdown(PROJECT_BLURB) # DISPLAY THE NON-TECHNICAL BLURB HERE
+st.title("Global TMS Rollout Risk Analysis")
+st.markdown(PROJECT_BLURB) 
 st.markdown(f"**Running {NUM_SIMULATIONS} Monte Carlo scenarios.** Adjust controls in the sidebar to test mitigation strategies.")
 
 # --- 1. Display Key Metrics (st.metric) ---
@@ -192,17 +183,14 @@ st.markdown(f"**Running {NUM_SIMULATIONS} Monte Carlo scenarios.** Adjust contro
 st.header("1. Critical Risk Metrics")
 col1, col2, col3 = st.columns(3)
 
-# Schedule Risk Card
 col1.subheader("Schedule Risk")
 col1.metric("90th Percentile Duration", f"{P90_DURATION/365:.2f} years", f"{100 * (1 - P_SUCCESS_TIME):.2f}% risk of overrun")
 col1.caption(f"Target: {SIM_DURATION/365:.1f} years (5 years)")
 
-# Cost Risk Card
 col2.subheader("Cost Risk")
 col2.metric("90th Percentile Cost", f"${P90_COST/1000000:.2f}M", f"{100 * (1 - P_SUCCESS_COST):.2f}% risk of overrun")
 col2.caption(f"Target: ${TARGET_COST_MAX/1000000:.1f}M")
 
-# Financial Risk Card
 col3.subheader("Financial Risk")
 col3.metric("10th Percentile ROI", f"{P10_ROI:.2f}", f"{100 * (1 - P_SUCCESS_ROI):.2f}% risk of failure")
 col3.caption(f"Target Min ROI: {TARGET_ROI_MIN:.0f}")
@@ -212,9 +200,7 @@ st.markdown("---")
 # --- 2. Chart the Results (st.pyplot) ---
 
 st.header("2. Risk Distribution Visuals")
-# Create a single Matplotlib figure object
 fig, axs = plt.subplots(1, 3, figsize=(18, 5)) 
-
 
 # 1. Duration Histogram (axs[0])
 axs[0].hist(DURATIONS/365, bins=30, color='skyblue', edgecolor='black')
@@ -243,6 +229,43 @@ cbar = fig.colorbar(scatter, ax=axs[2])
 cbar.set_label('ROI')
 
 plt.tight_layout()
-
-# Pass the entire figure object to Streamlit to display it
 st.pyplot(fig)
+
+st.markdown("---")
+
+# ====================================================================
+# G. EXPLANATION OF HELP AND GRAPHS
+# ====================================================================
+
+st.header("3. Interpretation and Value of This Simulation")
+
+st.markdown("### How This Simulation Helps Project Leadership")
+st.markdown("""
+This model transforms project management from relying on optimistic estimates (the 'best case') to making **risk-informed decisions**. It addresses the common pitfalls of multinational rollouts: resource conflicts, regulatory compliance, and currency volatility.
+
+* **Setting Realistic Expectations:** The **90th Percentile (P90)** metrics for Duration and Cost provide the **contingency budget and schedule** required to finish the project 9 out of 10 times. This protects against stakeholder disappointment and budget blowouts.
+* **Quantifying Mitigation ROI:** By changing the sliders (e.g., increasing **GIT Team Capacity**), project leaders can instantly see the **financial return** of that investment in terms of reduced project duration and lower probability of cost overrun.
+* **Focusing Mitigation Efforts:** The model clearly identifies the largest risks (e.g., is **Integration Difficulty** a bigger threat than **Carrier Non-Compliance**?) allowing resources to be focused where they have the biggest impact on ROI.
+""")
+
+st.markdown("### Explanation of the Graphs")
+with st.expander("Click to view detailed graph explanations"):
+    st.markdown("""
+    #### 1. Project Duration Distribution (Histogram)
+    * **What it shows:** The frequency of various project completion times. A wide spread indicates high **Schedule Volatility**.
+    * **Key Lines:**
+        * **Red Line (Target 5 Yrs):** The official deadline. The area of the bars to the **right** of this line represents the **Probability of Time Overrun**.
+        * **Orange Line (P90 Duration):** The **Risk-Adjusted Schedule**. This is the date you should plan for to be 90% certain you'll meet the deadline.
+
+    #### 2. Project Cost Distribution (Histogram)
+    * **What it shows:** The frequency of various final project costs. This captures risks like **Currency Fluctuation** and **Cost Overrun**.
+    * **Key Lines:**
+        * **Red Line (Target Cost):** The initial maximum budget. The bars to the **right** of this line represent the **Probability of Cost Overrun**.
+        * **Orange Line (P90 Cost):** The **Risk-Adjusted Budget** required to cover realistic contingencies 90% of the time.
+
+    #### 3. Cost vs. Duration (Scatter Plot)
+    * **What it shows:** The relationship between all three critical metrics: Cost, Duration, and ROI (color).
+    * **Interpretation:**
+        * **High Risk Zone:** Look at the points clustered in the **top-right corner** (high cost and high duration).
+        * **ROI Color:** The color of the points represents the **ROI** for that specific simulation run. You want the top-right cluster to have a high ROI (light color), but usually, it has a **low ROI (dark color)**, confirming that late, expensive projects destroy value.
+    """)
