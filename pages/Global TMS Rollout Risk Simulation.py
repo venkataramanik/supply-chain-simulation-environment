@@ -1,70 +1,95 @@
+
 import streamlit as st
 import simpy
 import random
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ====================================================================
-# A. NON-TECHNICAL PROJECT BLURB
-# ====================================================================
+# ===============================================================
+# A. Non-technical project blurb (no emojis/icons)
+# ===============================================================
 
 PROJECT_BLURB = """
-### 🚀 Project Goal: Predicting Rollout Success (or Failure)
+### Project Goal: Predicting Rollout Success (or Failure)
 
-We are running a **virtual simulation** of our five-year global Transportation Management System (TMS) rollout project.
+We are running a virtual simulation of a five-year global Transportation Management System (TMS) rollout.
 
-Instead of relying on a single, optimistic plan, we use the **Monte Carlo method** to run the project thousands of times. Each run uses random factors (like high carrier resistance, sudden currency swings, or integration delays) based on real-world risks.
+Rather than using a single optimistic plan, we run thousands of Monte Carlo trials. Each trial varies key risks
+(e.g., carrier resistance, currency swings, integration delays) within sensible ranges.
 
-**What we are trying to do:**
-1.  **Find the Risk-Adjusted Finish Date and Budget:** Determine the date and cost we are **90% sure** we won't exceed, giving us a realistic contingency buffer.
-2.  **Quantify Failure Probability:** Calculate the chance that we will miss our 5-year deadline, exceed our budget, or fail to achieve our target Return on Investment (ROI).
-3.  **Test Risk Mitigation:** By adjusting the sliders (e.g., increasing team size or reducing compliance risk), we can see the direct, quantifiable impact of these actions on our schedule, budget, and ROI.
+**Objectives**
+1) Estimate a risk-adjusted finish date and budget (e.g., P90) to size realistic contingency.
+2) Quantify probability of missing the time/budget/ROI targets.
+3) Test mitigations: adjust inputs (e.g., team capacity, compliance risk) and see real impact on schedule, cost, and ROI.
 """
 
-# ====================================================================
-# B. SIMULATION CONTROLS (THE STREAMLIT SIDEBAR) - WIDGETS
-# ====================================================================
+# ===============================================================
+# B. Sidebar controls and cache management
+# ===============================================================
 
-# Define global constants (non-widget, non-distribution)
-SIM_DURATION = 5 * 365 # 5 years in days
-TARGET_COST_MAX = 3_000_000 
-TARGET_ROI_MIN = 0.50 
+# Global constants
+SIM_DURATION = 5 * 365  # 5 years in days
+TARGET_COST_MAX = 3_000_000
+TARGET_ROI_MIN = 0.50
 
-# --- CALLBACK FUNCTION TO CLEAR CACHE ---
+# Session nonce for cache key & reseeding
+if "nonce" not in st.session_state:
+    st.session_state.nonce = 0
+
+def apply_and_recompute():
+    st.session_state.nonce += 1
+    st.rerun()
+
 def clear_simulation_cache():
-    """Clears the st.cache_data for the Monte Carlo function."""
     st.cache_data.clear()
 
 with st.sidebar:
-    st.title("⚙️ Simulation Controls")
-    
-    # --- 1. Project Parameters & Resources (Widgets) ---
+    st.title("Simulation Controls")
+
     st.subheader("Project & Resource Capacity")
-    # Add on_change=clear_simulation_cache to key interaction widgets
-    NUM_SIMULATIONS = st.number_input("Monte Carlo Runs", min_value=100, max_value=10000, value=5000, step=1000, on_change=clear_simulation_cache, key='num_sims')
-    GIT_TEAM_CAPACITY = st.number_input("Global Integration Team Size", min_value=1, max_value=10, value=4, step=1, on_change=clear_simulation_cache, key='git_cap')
-    
-    # --- 2. Risk Controls (Widgets) ---
+    NUM_SIMULATIONS = st.number_input(
+        "Monte Carlo Runs", min_value=100, max_value=20000, value=5000, step=500,
+        key="num_sims", on_change=clear_simulation_cache
+    )
+    GIT_TEAM_CAPACITY = st.number_input(
+        "Global Integration Team Size", min_value=1, max_value=20, value=4, step=1,
+        key="git_cap", on_change=clear_simulation_cache
+    )
+
     st.subheader("Risk Mitigation Levers")
-    PROB_CARRIER_NON_COMPLIANCE = st.slider("Carrier Non-Compliance Probability", min_value=0.0, max_value=0.5, value=0.2, step=0.05, format="%.2f", on_change=clear_simulation_cache, key='carrier_prob')
-    INTEGRATION_DIFFICULTY_FACTOR_MAX = st.slider("Max Integration Difficulty Multiplier", min_value=1.0, max_value=2.0, value=1.5, step=0.1, on_change=clear_simulation_cache, key='integration_max')
+    PROB_CARRIER_NON_COMPLIANCE = st.slider(
+        "Carrier Non-Compliance Probability", min_value=0.0, max_value=0.5, value=0.2, step=0.05,
+        format="%.2f", key="carrier_prob", on_change=clear_simulation_cache
+    )
+    INTEGRATION_DIFFICULTY_FACTOR_MAX = st.slider(
+        "Max Integration Difficulty Multiplier", min_value=1.0, max_value=2.0, value=1.5, step=0.1,
+        key="integration_max", on_change=clear_simulation_cache
+    )
+
     st.markdown("---")
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.button("Apply & recompute", on_click=apply_and_recompute, use_container_width=True)
+    with col_b:
+        if st.button("Clear cache", use_container_width=True):
+            clear_simulation_cache()
+            st.rerun()
 
+# ===============================================================
+# C. Risk parameter distributions (fixed)
+# ===============================================================
 
-# ====================================================================
-# C. MONTE CARLO INPUT DISTRIBUTIONS (FIXED RISK PARAMETERS)
-# ====================================================================
-
-T1_DURATION = (60, 90, 120)       
-ROLLOUT_TIME_BASE = (90, 150, 240)
-COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
-CURRENCY_FLUCTUATION_DIST = (-0.10, 0.0, 0.20)
-RESISTANCE_DELAY_FACTOR = (1.0, 1.15, 1.40)
-DATA_DELAY_DAYS = (5, 10, 30)
+T1_DURATION = (60, 90, 120)              # Global mobilization/design triangle (days)
+ROLLOUT_TIME_BASE = (90, 150, 240)       # Base per-region rollout (days)
+COST_OVERRUN_DIST = (0.0, 0.15, 0.50)    # Cost overrun factor
+CURRENCY_FLUCTUATION_DIST = (-0.10, 0.0, 0.20)  # FX impact factor
+RESISTANCE_DELAY_FACTOR = (1.0, 1.15, 1.40)     # Org resistance multiplies duration
+DATA_DELAY_DAYS = (5, 10, 30)            # Data prep/quality delay
 DATA_CLEANUP_COST = (20000, 50000, 100000)
 TARGET_ANNUAL_SAVINGS = 800000
-RATE_VOLATILITY_FACTOR = (0.9, 1.0, 1.2)
-CARRIER_PENALTY_DAYS = (10, 20, 50) 
+RATE_VOLATILITY_FACTOR = (0.9, 1.0, 1.2) # Freight rate volatility
+CARRIER_PENALTY_DAYS = (10, 20, 50)      # Penalty for compliance issues
+
 REGIONS = {
     'NA':    {'complexity': 1.0, 'compliance_risk': (10, 20, 40)},
     'EMEA':  {'complexity': 1.4, 'compliance_risk': (30, 60, 100)},
@@ -73,10 +98,9 @@ REGIONS = {
 }
 ROLLOUT_ORDER = ['NA', 'EMEA', 'APAC', 'LATAM']
 
-
-# ====================================================================
-# D. SIMPY MODEL: TMS ROLLOUT CLASS 
-# ====================================================================
+# ===============================================================
+# D. SimPy rollout model
+# ===============================================================
 
 class TMSRollout:
     def __init__(self, env, git_capacity, carrier_prob, integration_max, fixed_params):
@@ -84,12 +108,12 @@ class TMSRollout:
         self.total_cost_usd = 0.0
         self.git_team = simpy.Resource(env, capacity=git_capacity)
         self.carrier_prob = carrier_prob
-        self.integration_dist = (1.0, 1.2, integration_max) 
-        self.fixed = fixed_params 
+        self.integration_dist = (1.0, 1.2, integration_max)
+        self.fixed = fixed_params
         self.env.process(self.run_project())
 
     def run_project(self):
-        base_cost_setup = 500000 
+        base_cost_setup = 500000
         setup_time = np.random.triangular(*self.fixed['T1_DURATION'])
         yield self.env.timeout(setup_time)
         cost_factor = np.random.triangular(*self.fixed['COST_OVERRUN_DIST'])
@@ -100,37 +124,41 @@ class TMSRollout:
     def regional_rollout(self, region_key):
         region_data = self.fixed['REGIONS'][region_key]
         rollout_time = np.random.triangular(*self.fixed['ROLLOUT_TIME_BASE'])
-        
+
+        # Integration complexity/time
         integration_factor = np.random.triangular(*self.integration_dist)
         data_delay = np.random.triangular(*self.fixed['DATA_DELAY_DAYS'])
         rollout_time = rollout_time * integration_factor + data_delay
-        
+
+        # Resistance and compliance delay
         resistance_factor = np.random.triangular(*self.fixed['RESISTANCE_DELAY_FACTOR'])
         compliance_delay = np.random.triangular(*region_data['compliance_risk'])
         rollout_time = rollout_time * resistance_factor + compliance_delay
 
+        # Data cleanup cost
         data_cost = np.random.triangular(*self.fixed['DATA_CLEANUP_COST'])
         self.total_cost_usd += data_cost
 
+        # Execute using constrained team
         with self.git_team.request() as req:
             yield req
             yield self.env.timeout(rollout_time)
+            # Carrier non-compliance penalty
             if random.random() < self.carrier_prob:
                 penalty_time = np.random.triangular(*self.fixed['CARRIER_PENALTY_DAYS'])
                 yield self.env.timeout(penalty_time)
 
+        # Regional cost with FX and overrun
         base_cost_region = 200000 * region_data['complexity']
         cost_overrun = np.random.triangular(*self.fixed['COST_OVERRUN_DIST'])
-        currency_factor = np.random.triangular(*self.fixed['CURRENCY_FLUCTUATION_DIST']) 
+        currency_factor = np.random.triangular(*self.fixed['CURRENCY_FLUCTUATION_DIST'])
         final_regional_cost = base_cost_region * (1 + cost_overrun) * (1 + currency_factor)
         self.total_cost_usd += final_regional_cost
 
+# ===============================================================
+# E. Monte Carlo driver (nonce-based caching)
+# ===============================================================
 
-# ====================================================================
-# E. MONTE CARLO DRIVER AND ANALYSIS - CACHED FIX APPLIED
-# ====================================================================
-
-# Assemble fixed parameters into a single dictionary for clean passing
 FIXED_PARAMS = {
     'T1_DURATION': T1_DURATION,
     'ROLLOUT_TIME_BASE': ROLLOUT_TIME_BASE,
@@ -146,82 +174,83 @@ FIXED_PARAMS = {
     'TARGET_ANNUAL_SAVINGS': TARGET_ANNUAL_SAVINGS,
 }
 
-# ALL arguments (including fixed ones) are now passed explicitly to ensure caching works.
-@st.cache_data
-def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max, fixed_params):
-    ALL_PROJECT_DURATIONS = []
-    ALL_PROJECT_COSTS = []
-    ANNUAL_SAVINGS_RISKED = []
+def _seed_from_inputs(num_runs, git_capacity, carrier_prob, integration_max, nonce:int):
+    # Build a deterministic seed from inputs + nonce
+    base = 41 * num_runs + 97 * git_capacity + 389 * int(carrier_prob * 100) + 761 * int(integration_max * 10) + 1543 * nonce
+    base = int(base % (2**31 - 1))
+    if base <= 0:
+        base = 12345 + nonce
+    return base
 
-    # Seeding the random generators for determinism in the cache environment is critical
-    np.random.seed(42)
-    random.seed(42)
+@st.cache_data(show_spinner=False)
+def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max, fixed_params, _nonce:int):
+    seed = _seed_from_inputs(num_runs, git_capacity, carrier_prob, integration_max, _nonce)
+    np.random.seed(seed)
+    random.seed(seed)
 
-    for i in range(num_runs):
+    durations = []
+    costs = []
+    rois = []
+
+    PROJECT_LIFE_YEARS = 5
+
+    for _ in range(num_runs):
         env = simpy.Environment()
         project = TMSRollout(env, git_capacity, carrier_prob, integration_max, fixed_params)
         env.run(until=SIM_DURATION + 1000)
-        
-        ALL_PROJECT_DURATIONS.append(env.now)
-        ALL_PROJECT_COSTS.append(project.total_cost_usd)
-        
+
+        durations.append(env.now)
+        costs.append(project.total_cost_usd)
+
         rate_factor = np.random.triangular(*fixed_params['RATE_VOLATILITY_FACTOR'])
         realized_savings = fixed_params['TARGET_ANNUAL_SAVINGS'] / rate_factor
-        ANNUAL_SAVINGS_RISKED.append(realized_savings)
+        total_savings = realized_savings * PROJECT_LIFE_YEARS
+        total_project_cost = project.total_cost_usd
+        roi = (total_savings - total_project_cost) / max(total_project_cost, 1e-9)
+        rois.append(roi)
 
-    # --- Metrics Calculation ---
-    DURATIONS = np.array(ALL_PROJECT_DURATIONS)
-    COSTS = np.array(ALL_PROJECT_COSTS)
-    SAVINGS = np.array(ANNUAL_SAVINGS_RISKED)
+    DURATIONS = np.array(durations)
+    COSTS = np.array(costs)
+    ROIS = np.array(rois)
 
-    PROJECT_LIFE_YEARS = 5 
-    ALL_ROIS = []
-    for i in range(num_runs):
-        total_savings = SAVINGS[i] * PROJECT_LIFE_YEARS
-        total_project_cost = COSTS[i]
-        roi = (total_savings - total_project_cost) / total_project_cost
-        ALL_ROIS.append(roi)
-    ROIS = np.array(ALL_ROIS)
+    P_SUCCESS_TIME = float(np.sum(DURATIONS <= SIM_DURATION) / num_runs)
+    P_SUCCESS_COST = float(np.sum(COSTS <= TARGET_COST_MAX) / num_runs)
+    P_SUCCESS_ROI = float(np.sum(ROIS >= TARGET_ROI_MIN) / num_runs)
 
-    P_SUCCESS_TIME = np.sum(DURATIONS <= SIM_DURATION) / num_runs
-    P_SUCCESS_COST = np.sum(COSTS <= TARGET_COST_MAX) / num_runs
-    P_SUCCESS_ROI = np.sum(ROIS >= TARGET_ROI_MIN) / num_runs
-
-    P90_DURATION = np.percentile(DURATIONS, 90) 
-    P90_COST = np.percentile(COSTS, 90)       
-    P10_ROI = np.percentile(ROIS, 10) 
+    P90_DURATION = float(np.percentile(DURATIONS, 90))
+    P90_COST = float(np.percentile(COSTS, 90))
+    P10_ROI = float(np.percentile(ROIS, 10))
 
     return DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCESS_COST, P_SUCCESS_ROI
 
-# Call the function, passing ALL widget outputs AND the fixed parameters.
 DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCESS_COST, P_SUCCESS_ROI = run_monte_carlo_simulation(
-    NUM_SIMULATIONS, 
-    GIT_TEAM_CAPACITY, 
-    PROB_CARRIER_NON_COMPLIANCE, 
+    NUM_SIMULATIONS,
+    GIT_TEAM_CAPACITY,
+    PROB_CARRIER_NON_COMPLIANCE,
     INTEGRATION_DIFFICULTY_FACTOR_MAX,
-    FIXED_PARAMS 
+    FIXED_PARAMS,
+    st.session_state.nonce
 )
 
-# ====================================================================
-# F. STREAMLIT DASHBOARD OUTPUT
-# ====================================================================
+# ===============================================================
+# F. Dashboard output
+# ===============================================================
 
-st.title("🌍 Global TMS Rollout Risk Analysis")
-st.markdown(PROJECT_BLURB) 
-st.markdown(f"**Running {NUM_SIMULATIONS} Monte Carlo scenarios.** Adjust controls in the sidebar to test mitigation strategies.")
+st.title("Global TMS Rollout Risk Analysis")
+st.markdown(PROJECT_BLURB)
+st.markdown(f"Running {NUM_SIMULATIONS} Monte Carlo scenarios. Adjust controls in the sidebar and click 'Apply & recompute'.")
 
-# --- 1. Display Key Metrics (st.metric) ---
-
+# Key metrics
 st.header("1. Critical Risk Metrics")
 col1, col2, col3 = st.columns(3)
 
 col1.subheader("Schedule Risk")
 col1.metric("90th Percentile Duration", f"{P90_DURATION/365:.2f} years", f"{100 * (1 - P_SUCCESS_TIME):.2f}% risk of overrun")
-col1.caption(f"Target: {SIM_DURATION/365:.1f} years (5 years)")
+col1.caption(f"Target: {SIM_DURATION/365:.1f} years")
 
 col2.subheader("Cost Risk")
-col2.metric("90th Percentile Cost", f"${P90_COST/1000000:.2f}M", f"{100 * (1 - P_SUCCESS_COST):.2f}% risk of overrun")
-col2.caption(f"Target: ${TARGET_COST_MAX/1000000:.1f}M")
+col2.metric("90th Percentile Cost", f"${P90_COST/1_000_000:.2f}M", f"{100 * (1 - P_SUCCESS_COST):.2f}% risk of overrun")
+col2.caption(f"Target: ${TARGET_COST_MAX/1_000_000:.1f}M")
 
 col3.subheader("Financial Risk")
 col3.metric("10th Percentile ROI", f"{P10_ROI:.2f}", f"{100 * (1 - P_SUCCESS_ROI):.2f}% risk of failure")
@@ -229,33 +258,30 @@ col3.caption(f"Target Min ROI: {TARGET_ROI_MIN:.2f}")
 
 st.markdown("---")
 
-# ====================================================================
-# G. CHARTING AND EXPLANATION
-# ====================================================================
-
+# Charts
 st.header("2. Risk Distribution Visuals")
-fig, axs = plt.subplots(1, 3, figsize=(18, 5)) 
+fig, axs = plt.subplots(1, 3, figsize=(18, 5))
 
-# 1. Duration Histogram (axs[0])
+# Duration histogram
 axs[0].hist(DURATIONS/365, bins=30, color='skyblue', edgecolor='black')
-axs[0].axvline(SIM_DURATION/365, color='red', linestyle='dashed', linewidth=2, label='Target 5 Yrs')
+axs[0].axvline(SIM_DURATION/365, color='red', linestyle='dashed', linewidth=2, label='Target 5 Years')
 axs[0].axvline(P90_DURATION/365, color='orange', linestyle='dashed', linewidth=2, label='P90 Duration')
 axs[0].set_title('Project Duration Distribution (Years)')
 axs[0].set_xlabel('Duration (Years)')
 axs[0].set_ylabel('Frequency')
 axs[0].legend()
 
-# 2. Cost Histogram (axs[1])
-axs[1].hist(COSTS/1000000, bins=30, color='lightcoral', edgecolor='black')
-axs[1].axvline(TARGET_COST_MAX/1000000, color='red', linestyle='dashed', linewidth=2, label='Target Cost')
-axs[1].axvline(P90_COST/1000000, color='orange', linestyle='dashed', linewidth=2, label='P90 Cost')
+# Cost histogram
+axs[1].hist(COSTS/1_000_000, bins=30, color='lightcoral', edgecolor='black')
+axs[1].axvline(TARGET_COST_MAX/1_000_000, color='red', linestyle='dashed', linewidth=2, label='Target Cost')
+axs[1].axvline(P90_COST/1_000_000, color='orange', linestyle='dashed', linewidth=2, label='P90 Cost')
 axs[1].set_title('Project Cost Distribution (Millions USD)')
 axs[1].set_xlabel('Cost (Millions USD)')
 axs[1].set_ylabel('Frequency')
 axs[1].legend()
 
-# 3. Cost vs. Duration Scatter Plot (axs[2])
-scatter = axs[2].scatter(DURATIONS/365, COSTS/1000000, alpha=0.5, s=15, c=ROIS, cmap='viridis')
+# Cost vs. Duration scatter with ROI color
+scatter = axs[2].scatter(DURATIONS/365, COSTS/1_000_000, alpha=0.5, s=15, c=ROIS, cmap='viridis')
 axs[2].set_title('Cost vs. Duration (Colored by ROI)')
 axs[2].set_xlabel('Duration (Years)')
 axs[2].set_ylabel('Cost (Millions USD)')
@@ -268,34 +294,16 @@ st.pyplot(fig)
 st.markdown("---")
 
 st.header("3. Interpretation and Value of This Simulation")
-
-st.markdown("### How This Simulation Helps Project Leadership")
 st.markdown("""
-This model transforms project management from relying on optimistic estimates (the 'best case') to making **risk-informed decisions**. It addresses the common pitfalls of multinational rollouts: resource conflicts, regulatory compliance, and currency volatility.
-
-* **Setting Realistic Expectations:** The **90th Percentile (P90)** metrics for Duration and Cost provide the **contingency budget and schedule** required to finish the project 9 out of 10 times. This protects against stakeholder disappointment and budget blowouts.
-* **Quantifying Mitigation ROI:** By changing the sliders (e.g., increasing **GIT Team Capacity**), project leaders can instantly see the **financial return** of that investment in terms of reduced project duration and lower probability of cost overrun.
-* **Focusing Mitigation Efforts:** The model clearly identifies the largest risks (e.g., is **Integration Difficulty** a bigger threat than **Carrier Non-Compliance**?) allowing resources to be focused where they have the biggest impact on ROI.
+How this helps leadership  
+- Risk-adjusted targets: P90 duration and cost provide realistic contingency.  
+- Mitigation ROI: Raising team capacity or lowering compliance risk shows measurable impact on schedule and cost risk.  
+- Focus: Sensitivity of outcomes highlights which risks deserve attention first.
 """)
 
-st.markdown("### Explanation of the Graphs")
-with st.expander("Click to view detailed graph explanations"):
+with st.expander("Detailed graph explanations"):
     st.markdown("""
-    #### 1. Project Duration Distribution (Histogram)
-    * **What it shows:** The frequency of various project completion times. A wide spread indicates high **Schedule Volatility**.
-    * **Key Lines:**
-        * **Red Line (Target 5 Yrs):** The official deadline. The area of the bars to the **right** of this line represents the **Probability of Time Overrun**.
-        * **Orange Line (P90 Duration):** The **Risk-Adjusted Schedule**. This is the date you should plan for to be 90% certain you'll meet the deadline.
-
-    #### 2. Project Cost Distribution (Histogram)
-    * **What it shows:** The frequency of various final project costs. This captures risks like **Currency Fluctuation** and **Cost Overrun**.
-    * **Key Lines:**
-        * **Red Line (Target Cost):** The initial maximum budget. The bars to the **right** of this line represent the **Probability of Cost Overrun**.
-        * **Orange Line (P90 Cost):** The **Risk-Adjusted Budget** required to cover realistic contingencies 90% of the time.
-
-    #### 3. Cost vs. Duration (Scatter Plot)
-    * **What it shows:** The relationship between all three critical metrics: **Cost**, **Duration**, and **ROI** (represented by color).
-    * **Interpretation:**
-        * **High Risk Zone:** Look at the points clustered in the **top-right corner** (high cost and high duration).
-        * **ROI Color:** The color of the points represents the ROI. Scenarios clustered in the top-right often have a **low ROI (darker colors)**, confirming that late, expensive projects destroy value.
-    """)
+Duration histogram: area to the right of the red line is probability of time overrun; orange line is P90.  
+Cost histogram: area to the right of the red line is probability of cost overrun; orange line is P90.  
+Scatter: top-right cluster indicates late and expensive scenarios; color shows ROI (darker is worse).
+""")
