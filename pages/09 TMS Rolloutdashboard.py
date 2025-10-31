@@ -232,6 +232,25 @@ K = kpis(dfm_f)
 st.title("Global TMS Executive Cockpit")
 st.caption("One place for rollout, roadmap, KPIs, adoption, RAID, value, data quality, incidents & forecast")
 
+
+# ===== Active Filters Badges & Force Refresh =====
+with st.container():
+    b1, b2 = st.columns([3,1])
+    with b1:
+        st.markdown(
+            f"**Active scope:** "
+            f"`{region}` | "
+            f"`{pd.to_datetime(dr[0]).date()} → {pd.to_datetime(dr[1]).date()}` | "
+            f"`{shipments_pm:,} shp/mo` | "
+            f"`OT target {target_ontime:.0f}%` · `Adopt {target_adoption:.0f}%` · "
+            f"`DQ {target_dq:.0f}` · `Fresh≤{max_freshness:.0f}h` · `MTTR≤{max_mttr:.0f}h`"
+        )
+    with b2:
+        if st.button("↻ Force refresh (clear cache)"):
+            st.cache_data.clear()
+            st.experimental_rerun()
+
+
 # =====================
 # Executive Overview
 # =====================
