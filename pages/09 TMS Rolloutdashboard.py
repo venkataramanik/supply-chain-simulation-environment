@@ -248,7 +248,13 @@ with st.container():
     with b2:
         if st.button("↻ Force refresh (clear cache)"):
             st.cache_data.clear()
-            st.experimental_rerun()
+            try:
+                st.rerun()
+            except Exception:
+                try:
+                    st.experimental_rerun()
+                except Exception as _e:
+                    st.warning("Could not rerun automatically. Please refresh the page in your browser.")
 
 
 # =====================
