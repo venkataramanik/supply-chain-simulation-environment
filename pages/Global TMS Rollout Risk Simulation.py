@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # ====================================================================
 
 PROJECT_BLURB = """
-### 🚀 Project Goal: Predicting Rollout Success (or Failure)
+###  Project Goal: Predicting Rollout Success (or Failure)
 
 We are running a **virtual simulation** of our five-year global Transportation Management System (TMS) rollout project.
 
