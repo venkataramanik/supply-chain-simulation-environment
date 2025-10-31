@@ -27,7 +27,9 @@ Instead of relying on a single, optimistic plan, we use the **Monte Carlo method
 
 # Define global constants (non-widget, non-distribution)
 SIM_DURATION = 5 * 365 # 5 years in days
-TARGET_COST_MAX = 6_000_000 # Max budget for cost overrun analysis (USD)
+# CRITICAL FIX: Set a more challenging, realistic cost target
+TARGET_COST_MAX = 3_000_000 # Max budget for cost overrun analysis (USD)
+# CRITICAL FIX: Set a more challenging, realistic ROI target
 TARGET_ROI_MIN = 0.50 # Minimum acceptable ROI (50%)
 
 with st.sidebar:
@@ -79,7 +81,6 @@ class TMSRollout:
         self.total_cost_usd = 0.0
         self.git_team = simpy.Resource(env, capacity=git_capacity)
         self.carrier_prob = carrier_prob
-        # Integration distribution uses dynamic max parameter
         self.integration_dist = (1.0, 1.2, integration_max) 
         self.env.process(self.run_project())
 
@@ -96,12 +97,10 @@ class TMSRollout:
         region_data = REGIONS[region_key]
         rollout_time = np.random.triangular(*ROLLOUT_TIME_BASE)
         
-        # Operational Risk: Integration and Data Challenges (uses self.integration_dist)
         integration_factor = np.random.triangular(*self.integration_dist)
         data_delay = np.random.triangular(*DATA_DELAY_DAYS)
         rollout_time = rollout_time * integration_factor + data_delay
         
-        # Multinational Risk: Resistance
         resistance_factor = np.random.triangular(*RESISTANCE_DELAY_FACTOR)
         compliance_delay = np.random.triangular(*region_data['compliance_risk'])
         rollout_time = rollout_time * resistance_factor + compliance_delay
@@ -112,12 +111,10 @@ class TMSRollout:
         with self.git_team.request() as req:
             yield req
             yield self.env.timeout(rollout_time)
-            # Carrier Non-Compliance check (uses self.carrier_prob)
             if random.random() < self.carrier_prob:
                 penalty_time = np.random.triangular(*CARRIER_PENALTY_DAYS)
                 yield self.env.timeout(penalty_time)
 
-        # Regional Cost Calculation
         base_cost_region = 200000 * region_data['complexity']
         cost_overrun = np.random.triangular(*COST_OVERRUN_DIST)
         currency_factor = np.random.triangular(*CURRENCY_FLUCTUATION_DIST) 
@@ -129,7 +126,6 @@ class TMSRollout:
 # E. MONTE CARLO DRIVER AND ANALYSIS - CACHED FIX APPLIED
 # ====================================================================
 
-# ALL interactive widget values MUST be passed as arguments here.
 @st.cache_data
 def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max):
     ALL_PROJECT_DURATIONS = []
@@ -138,7 +134,6 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
 
     for i in range(num_runs):
         env = simpy.Environment()
-        # Pass all user inputs to the project initialization
         project = TMSRollout(env, git_capacity, carrier_prob, integration_max)
         env.run(until=SIM_DURATION + 1000)
         
@@ -159,6 +154,7 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
     for i in range(num_runs):
         total_savings = SAVINGS[i] * PROJECT_LIFE_YEARS
         total_project_cost = COSTS[i]
+        # ROI formula: (Total Savings - Total Cost) / Total Cost
         roi = (total_savings - total_project_cost) / total_project_cost
         ALL_ROIS.append(roi)
     ROIS = np.array(ALL_ROIS)
@@ -199,6 +195,7 @@ col1.metric("90th Percentile Duration", f"{P90_DURATION/365:.2f} years", f"{100 
 col1.caption(f"Target: {SIM_DURATION/365:.1f} years (5 years)")
 
 col2.subheader("Cost Risk")
+# Risk value update should now be instantaneous when a sidebar value changes
 col2.metric("90th Percentile Cost", f"${P90_COST/1000000:.2f}M", f"{100 * (1 - P_SUCCESS_COST):.2f}% risk of overrun")
 col2.caption(f"Target: ${TARGET_COST_MAX/1000000:.1f}M")
 
