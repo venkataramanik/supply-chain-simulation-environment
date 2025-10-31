@@ -5,10 +5,27 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # ====================================================================
-# A. SIMULATION CONTROLS (THE STREAMLIT SIDEBAR)
+# A. NON-TECHNICAL PROJECT BLURB
 # ====================================================================
 
-# Define constants 
+PROJECT_BLURB = """
+### 🚀 Project Goal: Predicting Rollout Success (or Failure)
+
+We are running a **virtual simulation** of our five-year global Transportation Management System (TMS) rollout project.
+
+Instead of relying on a single, optimistic plan, we use the **Monte Carlo method** to run the project thousands of times. Each run uses random factors (like high carrier resistance, sudden currency swings, or integration delays) based on real-world risks.
+
+**What we are trying to do:**
+1.  **Find the Risk-Adjusted Finish Date and Budget:** Determine the date and cost we are **90% sure** we won't exceed, giving us a realistic contingency buffer.
+2.  **Quantify Failure Probability:** Calculate the chance that we will miss our 5-year deadline, exceed our budget, or fail to achieve our target Return on Investment (ROI).
+3.  **Test Risk Mitigation:** By adjusting the sliders (e.g., increasing team size or reducing compliance risk), we can see the direct, quantifiable impact of these actions on our schedule, budget, and ROI.
+"""
+
+# ====================================================================
+# B. SIMULATION CONTROLS (THE STREAMLIT SIDEBAR)
+# ====================================================================
+
+# Define constants
 SIM_DURATION = 5 * 365 # 5 years in days
 TARGET_COST_MAX = 6_000_000 # Max budget for cost overrun analysis (USD)
 TARGET_ROI_MIN = 0.50 # Minimum acceptable ROI (50%)
@@ -17,18 +34,12 @@ TARGET_ROI_MIN = 0.50 # Minimum acceptable ROI (50%)
 with st.sidebar:
     st.title("⚙️ Simulation Controls")
     
-    # 1. Project Parameters & Resources
+    # --- 1. Project Parameters & Resources (Widgets) ---
     st.subheader("Project & Resource Capacity")
-    # Use st.cache_data to ensure Streamlit reruns the heavy simulation only when these inputs change
-    @st.cache_data
-    def get_user_inputs():
-        num_simulations = st.number_input("Monte Carlo Runs", min_value=100, max_value=10000, value=5000, step=1000)
-        git_team_capacity = st.number_input("Global Integration Team Size", min_value=1, max_value=10, value=4, step=1)
-        return num_simulations, git_team_capacity
-
-    NUM_SIMULATIONS, GIT_TEAM_CAPACITY = get_user_inputs()
+    NUM_SIMULATIONS = st.number_input("Monte Carlo Runs", min_value=100, max_value=10000, value=5000, step=1000)
+    GIT_TEAM_CAPACITY = st.number_input("Global Integration Team Size", min_value=1, max_value=10, value=4, step=1)
     
-    # 2. Risk Controls
+    # --- 2. Risk Controls (Widgets) ---
     st.subheader("Risk Mitigation Levers")
     PROB_CARRIER_NON_COMPLIANCE = st.slider("Carrier Non-Compliance Probability", min_value=0.0, max_value=0.5, value=0.2, step=0.05, format="%.2f")
     INTEGRATION_DIFFICULTY_FACTOR_MAX = st.slider("Max Integration Difficulty Multiplier", min_value=1.0, max_value=2.0, value=1.5, step=0.1)
@@ -36,30 +47,20 @@ with st.sidebar:
 
 
 # ====================================================================
-# B. MONTE CARLO INPUT DISTRIBUTIONS (RISK PARAMETERS)
+# C. MONTE CARLO INPUT DISTRIBUTIONS (RISK PARAMETERS)
 # ====================================================================
 
-# Project Execution Risks (Min, Mode, Max)
+# These are the statistical distributions for the risks (Triangular: Min, Mode, Max)
 T1_DURATION = (60, 90, 120)       
 ROLLOUT_TIME_BASE = (90, 150, 240)
 COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
-
-# Multinational Risks
 CURRENCY_FLUCTUATION_DIST = (-0.10, 0.0, 0.20)
 RESISTANCE_DELAY_FACTOR = (1.0, 1.15, 1.40)
-
-# Data Risks
 DATA_DELAY_DAYS = (5, 10, 30)
 DATA_CLEANUP_COST = (20000, 50000, 100000)
-# This distribution will be updated based on the sidebar slider
-INTEGRATION_DIFFICULTY_FACTOR_DIST = (1.0, 1.2, INTEGRATION_DIFFICULTY_FACTOR_MAX) 
-
-# ROI/Financial Risks
 TARGET_ANNUAL_SAVINGS = 800000
 RATE_VOLATILITY_FACTOR = (0.9, 1.0, 1.2)
 CARRIER_PENALTY_DAYS = (10, 20, 50) 
-
-# Regional Profiles 
 REGIONS = {
     'NA':    {'complexity': 1.0, 'compliance_risk': (10, 20, 40)},
     'EMEA':  {'complexity': 1.4, 'compliance_risk': (30, 60, 100)},
@@ -68,8 +69,9 @@ REGIONS = {
 }
 ROLLOUT_ORDER = ['NA', 'EMEA', 'APAC', 'LATAM']
 
+
 # ====================================================================
-# C. SIMPY MODEL: TMS ROLLOUT CLASS (DISCRETE EVENT SIMULATION)
+# D. SIMPY MODEL: TMS ROLLOUT CLASS 
 # ====================================================================
 
 class TMSRollout:
@@ -82,22 +84,16 @@ class TMSRollout:
         self.env.process(self.run_project())
 
     def run_project(self):
-        # --- PHASE 1: Core System Setup ---
         base_cost_setup = 500000 
         setup_time = np.random.triangular(*T1_DURATION)
         yield self.env.timeout(setup_time)
-        
         cost_factor = np.random.triangular(*COST_OVERRUN_DIST)
         self.total_cost_usd += base_cost_setup * (1 + cost_factor)
-        
-        # --- PHASE 2: Staged Regional Rollouts ---
         for region_key in ROLLOUT_ORDER:
             yield self.env.process(self.regional_rollout(region_key))
 
     def regional_rollout(self, region_key):
         region_data = REGIONS[region_key]
-
-        # 1. Calculate Risk-Adjusted Duration (Monte Carlo Sampling)
         rollout_time = np.random.triangular(*ROLLOUT_TIME_BASE)
         
         # Operational Risk: Integration and Data Challenges
@@ -110,43 +106,35 @@ class TMSRollout:
         compliance_delay = np.random.triangular(*region_data['compliance_risk'])
         rollout_time = rollout_time * resistance_factor + compliance_delay
 
-        # Add Data Cleanup Cost
         data_cost = np.random.triangular(*DATA_CLEANUP_COST)
         self.total_cost_usd += data_cost
 
-        # 2. Acquire Global Integration Team (GIT) Resource
         with self.git_team.request() as req:
-            yield req # Wait for the team to be available
-            
-            # Execute Rollout
+            yield req
             yield self.env.timeout(rollout_time)
-
-            # 3. Transportation Risk: Carrier Non-Compliance Check (Stochastic Event)
+            # Carrier Non-Compliance check
             if random.random() < self.carrier_prob:
                 penalty_time = np.random.triangular(*CARRIER_PENALTY_DAYS)
-                yield self.env.timeout(penalty_time) # Non-compliance forces a delay
+                yield self.env.timeout(penalty_time)
 
-        # 4. Regional Cost Calculation (Including Multinational Currency Risk)
+        # Regional Cost Calculation
         base_cost_region = 200000 * region_data['complexity']
         cost_overrun = np.random.triangular(*COST_OVERRUN_DIST)
         currency_factor = np.random.triangular(*CURRENCY_FLUCTUATION_DIST) 
-        
         final_regional_cost = base_cost_region * (1 + cost_overrun) * (1 + currency_factor)
         self.total_cost_usd += final_regional_cost
 
 
 # ====================================================================
-# D. MONTE CARLO DRIVER AND ANALYSIS
+# E. MONTE CARLO DRIVER AND ANALYSIS - CACHED
 # ====================================================================
 
+# This function is cached: it only reruns when inputs change, saving time.
 @st.cache_data
 def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration_max):
     ALL_PROJECT_DURATIONS = []
     ALL_PROJECT_COSTS = []
     ANNUAL_SAVINGS_RISKED = []
-    
-    # Re-evaluate the integration factor distribution for this run
-    INTEGRATION_DIFFICULTY_FACTOR_DIST = (1.0, 1.2, integration_max) 
 
     for i in range(num_runs):
         env = simpy.Environment()
@@ -154,7 +142,6 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
         project = TMSRollout(env, git_capacity, carrier_prob, integration_max)
         env.run(until=SIM_DURATION + 1000)
         
-        # Collect results
         ALL_PROJECT_DURATIONS.append(env.now)
         ALL_PROJECT_COSTS.append(project.total_cost_usd)
         
@@ -168,23 +155,19 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
     COSTS = np.array(ALL_PROJECT_COSTS)
     SAVINGS = np.array(ANNUAL_SAVINGS_RISKED)
 
-    # Calculate ROI for each run
     PROJECT_LIFE_YEARS = 5 
     ALL_ROIS = []
     for i in range(num_runs):
         total_savings = SAVINGS[i] * PROJECT_LIFE_YEARS
         total_project_cost = COSTS[i]
-        # ROI formula: (Total Savings - Total Cost) / Total Cost
         roi = (total_savings - total_project_cost) / total_project_cost
         ALL_ROIS.append(roi)
     ROIS = np.array(ALL_ROIS)
 
-    # Risk Metrics
     P_SUCCESS_TIME = np.sum(DURATIONS <= SIM_DURATION) / num_runs
     P_SUCCESS_COST = np.sum(COSTS <= TARGET_COST_MAX) / num_runs
     P_SUCCESS_ROI = np.sum(ROIS >= TARGET_ROI_MIN) / num_runs
 
-    # Percentiles (P90 for Cost/Duration, P10 for ROI)
     P90_DURATION = np.percentile(DURATIONS, 90) 
     P90_COST = np.percentile(COSTS, 90)       
     P10_ROI = np.percentile(ROIS, 10) 
@@ -197,10 +180,11 @@ DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCE
 )
 
 # ====================================================================
-# E. STREAMLIT DASHBOARD OUTPUT
+# F. STREAMLIT DASHBOARD OUTPUT
 # ====================================================================
 
 st.title("🌍 Global TMS Rollout Risk Analysis")
+st.markdown(PROJECT_BLURB) # DISPLAY THE NON-TECHNICAL BLURB HERE
 st.markdown(f"**Running {NUM_SIMULATIONS} Monte Carlo scenarios.** Adjust controls in the sidebar to test mitigation strategies.")
 
 # --- 1. Display Key Metrics (st.metric) ---
@@ -231,6 +215,7 @@ st.header("2. Risk Distribution Visuals")
 # Create a single Matplotlib figure object
 fig, axs = plt.subplots(1, 3, figsize=(18, 5)) 
 
+
 # 1. Duration Histogram (axs[0])
 axs[0].hist(DURATIONS/365, bins=30, color='skyblue', edgecolor='black')
 axs[0].axvline(SIM_DURATION/365, color='red', linestyle='dashed', linewidth=2, label='Target 5 Yrs')
@@ -259,5 +244,5 @@ cbar.set_label('ROI')
 
 plt.tight_layout()
 
-# CRITICAL FIX: Pass the entire figure object to Streamlit to display it
+# Pass the entire figure object to Streamlit to display it
 st.pyplot(fig)
