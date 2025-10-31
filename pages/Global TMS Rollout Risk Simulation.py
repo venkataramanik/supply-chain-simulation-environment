@@ -27,23 +27,27 @@ Instead of relying on a single, optimistic plan, we use the **Monte Carlo method
 
 # Define global constants (non-widget, non-distribution)
 SIM_DURATION = 5 * 365 # 5 years in days
-# Set a challenging, realistic cost target
 TARGET_COST_MAX = 3_000_000 
-# Set a challenging, realistic ROI target
 TARGET_ROI_MIN = 0.50 
+
+# --- CALLBACK FUNCTION TO CLEAR CACHE ---
+def clear_simulation_cache():
+    """Clears the st.cache_data for the Monte Carlo function."""
+    st.cache_data.clear()
 
 with st.sidebar:
     st.title("⚙️ Simulation Controls")
     
     # --- 1. Project Parameters & Resources (Widgets) ---
     st.subheader("Project & Resource Capacity")
-    NUM_SIMULATIONS = st.number_input("Monte Carlo Runs", min_value=100, max_value=10000, value=5000, step=1000)
-    GIT_TEAM_CAPACITY = st.number_input("Global Integration Team Size", min_value=1, max_value=10, value=4, step=1)
+    # Add on_change=clear_simulation_cache to key interaction widgets
+    NUM_SIMULATIONS = st.number_input("Monte Carlo Runs", min_value=100, max_value=10000, value=5000, step=1000, on_change=clear_simulation_cache, key='num_sims')
+    GIT_TEAM_CAPACITY = st.number_input("Global Integration Team Size", min_value=1, max_value=10, value=4, step=1, on_change=clear_simulation_cache, key='git_cap')
     
     # --- 2. Risk Controls (Widgets) ---
     st.subheader("Risk Mitigation Levers")
-    PROB_CARRIER_NON_COMPLIANCE = st.slider("Carrier Non-Compliance Probability", min_value=0.0, max_value=0.5, value=0.2, step=0.05, format="%.2f")
-    INTEGRATION_DIFFICULTY_FACTOR_MAX = st.slider("Max Integration Difficulty Multiplier", min_value=1.0, max_value=2.0, value=1.5, step=0.1)
+    PROB_CARRIER_NON_COMPLIANCE = st.slider("Carrier Non-Compliance Probability", min_value=0.0, max_value=0.5, value=0.2, step=0.05, format="%.2f", on_change=clear_simulation_cache, key='carrier_prob')
+    INTEGRATION_DIFFICULTY_FACTOR_MAX = st.slider("Max Integration Difficulty Multiplier", min_value=1.0, max_value=2.0, value=1.5, step=0.1, on_change=clear_simulation_cache, key='integration_max')
     st.markdown("---")
 
 
@@ -51,7 +55,6 @@ with st.sidebar:
 # C. MONTE CARLO INPUT DISTRIBUTIONS (FIXED RISK PARAMETERS)
 # ====================================================================
 
-# These distributions are fixed and will now be explicitly passed to the cached function
 T1_DURATION = (60, 90, 120)       
 ROLLOUT_TIME_BASE = (90, 150, 240)
 COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
@@ -82,7 +85,7 @@ class TMSRollout:
         self.git_team = simpy.Resource(env, capacity=git_capacity)
         self.carrier_prob = carrier_prob
         self.integration_dist = (1.0, 1.2, integration_max) 
-        self.fixed = fixed_params # Store all fixed distributions here
+        self.fixed = fixed_params 
         self.env.process(self.run_project())
 
     def run_project(self):
@@ -150,9 +153,12 @@ def run_monte_carlo_simulation(num_runs, git_capacity, carrier_prob, integration
     ALL_PROJECT_COSTS = []
     ANNUAL_SAVINGS_RISKED = []
 
+    # Seeding the random generators for determinism in the cache environment is critical
+    np.random.seed(42)
+    random.seed(42)
+
     for i in range(num_runs):
         env = simpy.Environment()
-        # Pass fixed parameters to TMSRollout
         project = TMSRollout(env, git_capacity, carrier_prob, integration_max, fixed_params)
         env.run(until=SIM_DURATION + 1000)
         
@@ -193,7 +199,7 @@ DURATIONS, COSTS, ROIS, P90_DURATION, P90_COST, P10_ROI, P_SUCCESS_TIME, P_SUCCE
     GIT_TEAM_CAPACITY, 
     PROB_CARRIER_NON_COMPLIANCE, 
     INTEGRATION_DIFFICULTY_FACTOR_MAX,
-    FIXED_PARAMS # Explicitly pass the fixed distributions
+    FIXED_PARAMS 
 )
 
 # ====================================================================
