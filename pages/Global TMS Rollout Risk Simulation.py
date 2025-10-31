@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 # ====================================================================
 
 PROJECT_BLURB = """
-### Project Goal: Predicting Rollout Success (or Failure)
+### 🚀 Project Goal: Predicting Rollout Success (or Failure)
 
 We are running a **virtual simulation** of our five-year global Transportation Management System (TMS) rollout project.
 
@@ -25,7 +25,7 @@ Instead of relying on a single, optimistic plan, we use the **Monte Carlo method
 # B. SIMULATION CONTROLS (THE STREAMLIT SIDEBAR) - WIDGETS
 # ====================================================================
 
-# Define constants
+# Define global constants (non-widget, non-distribution)
 SIM_DURATION = 5 * 365 # 5 years in days
 TARGET_COST_MAX = 6_000_000 # Max budget for cost overrun analysis (USD)
 TARGET_ROI_MIN = 0.50 # Minimum acceptable ROI (50%)
@@ -49,7 +49,7 @@ with st.sidebar:
 # C. MONTE CARLO INPUT DISTRIBUTIONS (FIXED RISK PARAMETERS)
 # ====================================================================
 
-# These fixed distributions do not rely on sidebar widgets
+# These distributions are fixed and do not rely on sidebar widgets
 T1_DURATION = (60, 90, 120)       
 ROLLOUT_TIME_BASE = (90, 150, 240)
 COST_OVERRUN_DIST = (0.0, 0.15, 0.50)
@@ -74,13 +74,13 @@ ROLLOUT_ORDER = ['NA', 'EMEA', 'APAC', 'LATAM']
 # ====================================================================
 
 class TMSRollout:
-    # Class accepts and uses all dynamic parameters
     def __init__(self, env, git_capacity, carrier_prob, integration_max):
         self.env = env
         self.total_cost_usd = 0.0
         self.git_team = simpy.Resource(env, capacity=git_capacity)
         self.carrier_prob = carrier_prob
-        self.integration_dist = (1.0, 1.2, integration_max) # Uses dynamic max
+        # Integration distribution uses dynamic max parameter
+        self.integration_dist = (1.0, 1.2, integration_max) 
         self.env.process(self.run_project())
 
     def run_project(self):
@@ -96,7 +96,7 @@ class TMSRollout:
         region_data = REGIONS[region_key]
         rollout_time = np.random.triangular(*ROLLOUT_TIME_BASE)
         
-        # Operational Risk: Integration and Data Challenges
+        # Operational Risk: Integration and Data Challenges (uses self.integration_dist)
         integration_factor = np.random.triangular(*self.integration_dist)
         data_delay = np.random.triangular(*DATA_DELAY_DAYS)
         rollout_time = rollout_time * integration_factor + data_delay
@@ -112,7 +112,7 @@ class TMSRollout:
         with self.git_team.request() as req:
             yield req
             yield self.env.timeout(rollout_time)
-            # Carrier Non-Compliance check
+            # Carrier Non-Compliance check (uses self.carrier_prob)
             if random.random() < self.carrier_prob:
                 penalty_time = np.random.triangular(*CARRIER_PENALTY_DAYS)
                 yield self.env.timeout(penalty_time)
@@ -195,7 +195,6 @@ st.header("1. Critical Risk Metrics")
 col1, col2, col3 = st.columns(3)
 
 col1.subheader("Schedule Risk")
-# Risk value update should now be instantaneous when a sidebar value changes
 col1.metric("90th Percentile Duration", f"{P90_DURATION/365:.2f} years", f"{100 * (1 - P_SUCCESS_TIME):.2f}% risk of overrun")
 col1.caption(f"Target: {SIM_DURATION/365:.1f} years (5 years)")
 
@@ -266,19 +265,16 @@ with st.expander("Click to view detailed graph explanations"):
     * **Key Lines:**
         * **Red Line (Target 5 Yrs):** The official deadline. The area of the bars to the **right** of this line represents the **Probability of Time Overrun**.
         * **Orange Line (P90 Duration):** The **Risk-Adjusted Schedule**. This is the date you should plan for to be 90% certain you'll meet the deadline.
-    
 
     #### 2. Project Cost Distribution (Histogram)
     * **What it shows:** The frequency of various final project costs. This captures risks like **Currency Fluctuation** and **Cost Overrun**.
     * **Key Lines:**
         * **Red Line (Target Cost):** The initial maximum budget. The bars to the **right** of this line represent the **Probability of Cost Overrun**.
         * **Orange Line (P90 Cost):** The **Risk-Adjusted Budget** required to cover realistic contingencies 90% of the time.
-    
 
     #### 3. Cost vs. Duration (Scatter Plot)
     * **What it shows:** The relationship between all three critical metrics: **Cost**, **Duration**, and **ROI** (represented by color).
     * **Interpretation:**
         * **High Risk Zone:** Look at the points clustered in the **top-right corner** (high cost and high duration).
         * **ROI Color:** The color of the points represents the ROI. Scenarios clustered in the top-right often have a **low ROI (darker colors)**, confirming that late, expensive projects destroy value.
-    
     """)
