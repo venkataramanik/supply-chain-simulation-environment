@@ -45,7 +45,7 @@ def gen_base(seed=10):
             ))
     df_ops = pd.DataFrame(rows)
 
-    # Company month rollup
+    # Company month rollup (initial; savings recalculated later with sidebar shipments control)
     dfm = (df_ops.groupby("Month")
            .agg(Cost_Baseline=("Cost_Baseline","mean"),
                 Cost_TMS=("Cost_TMS","mean"),
@@ -61,9 +61,6 @@ def gen_base(seed=10):
                 MTTR_Hours=("MTTR_Hours","mean"),
                 Interface_Uptime=("Interface_Uptime","mean")
                 ).reset_index())
-    shipments = 3200
-    dfm["Monthly_Savings"] = (dfm["Cost_Baseline"]-dfm["Cost_TMS"]).clip(lower=0)*shipments
-    dfm["Cumulative_Savings"] = dfm["Monthly_Savings"].cumsum()
 
     # Rollout countries and wave cohorts
     countries = [
@@ -117,7 +114,7 @@ def gen_base(seed=10):
 
     # Savings waterfall components (illustrative)
     waterfall = pd.DataFrame({
-        "label": ["Baseline Spend","Mode/Route Opt","Auto Tender","Freight Audit","Dwell Reduction","Other","Post‑TMS Spend"],
+        "label": ["Baseline Spend","Route Opt","Auto Tender","Freight Audit","Dwell Reduction","Other","Post‑TMS Spend"],
         "value": [0, -8.5, -6.0, -3.2, -2.4, -1.0, 0],  # percentage points
         "type": ["total","relative","relative","relative","relative","relative","total"]
     })
@@ -126,36 +123,108 @@ def gen_base(seed=10):
 
 df_ops, dfm, df_roll, df_gantt, df_risk, risk_burn, waterfall = gen_base()
 
-# Optional CSV overrides
-st.sidebar.header("Upload Overrides (Optional)")
+# =====================
+# SIDEBAR CONTROLS
+# =====================
+st.sidebar.title("Controls")
+
+# Upload Overrides
+st.sidebar.subheader("Upload Overrides (Optional)")
 up_ops = st.sidebar.file_uploader("Operational metrics CSV (region-month)", type=["csv"])
 if up_ops is not None:
     try:
         df_ops = pd.read_csv(up_ops, parse_dates=["Month"])
         st.sidebar.success("Operational metrics loaded.")
+        # Rebuild dfm after override
+        dfm = (df_ops.groupby("Month")
+               .agg(Cost_Baseline=("Cost_Baseline","mean"),
+                    Cost_TMS=("Cost_TMS","mean"),
+                    On_Time_Percent=("On_Time_Percent","mean"),
+                    Adoption_Rate=("Adoption_Rate","mean"),
+                    Data_Quality=("Data_Quality","mean"),
+                    Data_Freshness_Hours=("Data_Freshness_Hours","mean"),
+                    CO2_Baseline=("CO2_Baseline","mean"),
+                    CO2_TMS=("CO2_TMS","mean"),
+                    Dwell_Baseline_Hours=("Dwell_Baseline_Hours","mean"),
+                    Dwell_TMS_Hours=("Dwell_TMS_Hours","mean"),
+                    Incidents=("Incidents","sum"),
+                    MTTR_Hours=("MTTR_Hours","mean"),
+                    Interface_Uptime=("Interface_Uptime","mean")).reset_index())
     except Exception as e:
         st.sidebar.error(f"Failed to read ops CSV: {e}")
+
+# Filters
+st.sidebar.subheader("Filters")
+date_min, date_max = dfm["Month"].min(), dfm["Month"].max()
+dr = st.sidebar.slider("Date range", min_value=date_min.to_pydatetime(), max_value=date_max.to_pydatetime(),
+                       value=(date_min.to_pydatetime(), date_max.to_pydatetime()))
+region_opt = ["All"] + sorted(df_ops["Region"].unique().tolist())
+region = st.sidebar.selectbox("Region", region_opt, index=0)
+
+# Shipments per month (affects savings calc)
+shipments_pm = st.sidebar.number_input("Shipments per month (selected scope)", min_value=100, max_value=100000, value=3200, step=100)
+
+# Targets/Thresholds (controls for health & alerts)
+st.sidebar.subheader("Targets & Thresholds")
+target_ontime = st.sidebar.number_input("On‑time target (%)", min_value=50.0, max_value=100.0, value=92.0, step=0.5)
+target_adoption = st.sidebar.number_input("Adoption target (%)", min_value=0.0, max_value=100.0, value=80.0, step=0.5)
+target_dq = st.sidebar.number_input("Data Quality target", min_value=0.0, max_value=100.0, value=85.0, step=0.5)
+max_freshness = st.sidebar.number_input("Max data freshness (hours)", min_value=1.0, max_value=72.0, value=12.0, step=0.5)
+max_mttr = st.sidebar.number_input("Max MTTR (hours)", min_value=1.0, max_value=48.0, value=8.0, step=0.5)
+
+# Scenario levers (impact per shipment)
+st.sidebar.subheader("Scenario Assumptions (USD/shipment)")
+delta_route = st.sidebar.slider("Route optimization", 0.0, 10.0, 3.0, 0.5)
+delta_tender = st.sidebar.slider("Auto-tender", 0.0, 8.0, 2.0, 0.5)
+delta_dwell = st.sidebar.slider("Dwell reduction", 0.0, 6.0, 1.5, 0.5)
 
 # =====================
 # Helpers
 # =====================
-def kpis(dfm):
-    latest = dfm.iloc[-1]
-    cost_red = (1 - dfm["Cost_TMS"].mean()/dfm["Cost_Baseline"].mean())*100
+def rebuild_dfm_scope(df_ops, dfm, region, dr, shipments_pm):
+    m0, m1 = pd.to_datetime(dr[0]), pd.to_datetime(dr[1])
+    if region == "All":
+        dfX = dfm[(dfm["Month"]>=m0) & (dfm["Month"]<=m1)].copy()
+    else:
+        dfo = df_ops[(df_ops["Region"]==region) & (df_ops["Month"]>=m0) & (df_ops["Month"]<=m1)].copy()
+        dfX = (dfo.groupby("Month").agg(Cost_Baseline=("Cost_Baseline","mean"),
+                                        Cost_TMS=("Cost_TMS","mean"),
+                                        On_Time_Percent=("On_Time_Percent","mean"),
+                                        Adoption_Rate=("Adoption_Rate","mean"),
+                                        Data_Quality=("Data_Quality","mean"),
+                                        Data_Freshness_Hours=("Data_Freshness_Hours","mean"),
+                                        CO2_Baseline=("CO2_Baseline","mean"),
+                                        CO2_TMS=("CO2_TMS","mean"),
+                                        Dwell_Baseline_Hours=("Dwell_Baseline_Hours","mean"),
+                                        Dwell_TMS_Hours=("Dwell_TMS_Hours","mean"),
+                                        Incidents=("Incidents","sum"),
+                                        MTTR_Hours=("MTTR_Hours","mean"),
+                                        Interface_Uptime=("Interface_Uptime","mean")).reset_index())
+    # Savings per month uses sidebar shipments_pm
+    dfX["Monthly_Savings"] = (dfX["Cost_Baseline"]-dfX["Cost_TMS"]).clip(lower=0)*shipments_pm
+    dfX["Cumulative_Savings"] = dfX["Monthly_Savings"].cumsum()
+    return dfX
+
+def kpis(dfX):
+    latest = dfX.iloc[-1]
+    cost_red = (1 - dfX["Cost_TMS"].mean()/dfX["Cost_Baseline"].mean())*100
     ontime = latest["On_Time_Percent"]
     adopt = latest["Adoption_Rate"]
     dq = latest["Data_Quality"]
-    cumsave = dfm["Cumulative_Savings"].iloc[-1]
-    co2 = (1 - dfm["CO2_TMS"].mean()/dfm["CO2_Baseline"].mean())*100
-    dwell = (1 - dfm["Dwell_TMS_Hours"].mean()/dfm["Dwell_Baseline_Hours"].mean())*100
-    mttr = latest["MTTR_Hours"]
+    cumsave = dfX["Cumulative_Savings"].iloc[-1]
     uptime = latest["Interface_Uptime"]
-    return dict(cost_red=cost_red, ontime=ontime, adopt=adopt, dq=dq, cumsave=cumsave, co2=co2, dwell=dwell, mttr=mttr, uptime=uptime)
+    return dict(cost_red=cost_red, ontime=ontime, adopt=adopt, dq=dq, cumsave=cumsave, uptime=uptime)
 
-def health_color(v, green, amber):
+def rag(v, green, amber):
     if v >= green: return "✅"
     if v >= amber: return "🟡"
     return "🔴"
+
+# =====================
+# Build scope
+# =====================
+dfm_f = rebuild_dfm_scope(df_ops, dfm, region, dr, shipments_pm)
+K = kpis(dfm_f)
 
 # =====================
 # Header
@@ -163,67 +232,26 @@ def health_color(v, green, amber):
 st.title("Global TMS Executive Cockpit")
 st.caption("One place for rollout, roadmap, KPIs, adoption, RAID, value, data quality, incidents & forecast")
 
-# Global filters
-date_min, date_max = dfm["Month"].min(), dfm["Month"].max()
-colf1, colf2, colf3 = st.columns([2,2,3])
-with colf1:
-    dr = st.slider("Date range", min_value=date_min.to_pydatetime(), max_value=date_max.to_pydatetime(),
-                   value=(date_min.to_pydatetime(), date_max.to_pydatetime()))
-with colf2:
-    region_opt = ["All"] + sorted(df_ops["Region"].unique().tolist())
-    region = st.selectbox("Region", region_opt, index=0)
-with colf3:
-    st.info("Tip: Upload overrides on the left sidebar to demo with your data.")
-
-def filter_dfm(df_ops, dfm, region, dr):
-    m0, m1 = pd.to_datetime(dr[0]), pd.to_datetime(dr[1])
-    if region == "All":
-        return dfm[(dfm["Month"]>=m0) & (dfm["Month"]<=m1)].copy()
-    # rebuild dfm for region
-    dfo = df_ops[(df_ops["Region"]==region) & (df_ops["Month"]>=m0) & (df_ops["Month"]<=m1)].copy()
-    dfmr = (dfo.groupby("Month").agg(Cost_Baseline=("Cost_Baseline","mean"),
-                                     Cost_TMS=("Cost_TMS","mean"),
-                                     On_Time_Percent=("On_Time_Percent","mean"),
-                                     Adoption_Rate=("Adoption_Rate","mean"),
-                                     Data_Quality=("Data_Quality","mean"),
-                                     Data_Freshness_Hours=("Data_Freshness_Hours","mean"),
-                                     CO2_Baseline=("CO2_Baseline","mean"),
-                                     CO2_TMS=("CO2_TMS","mean"),
-                                     Dwell_Baseline_Hours=("Dwell_Baseline_Hours","mean"),
-                                     Dwell_TMS_Hours=("Dwell_TMS_Hours","mean"),
-                                     Incidents=("Incidents","sum"),
-                                     MTTR_Hours=("MTTR_Hours","mean"),
-                                     Interface_Uptime=("Interface_Uptime","mean")).reset_index())
-    shipments = 900
-    dfmr["Monthly_Savings"] = (dfmr["Cost_Baseline"]-dfmr["Cost_TMS"]).clip(lower=0)*shipments
-    dfmr["Cumulative_Savings"] = dfmr["Monthly_Savings"].cumsum()
-    return dfmr
-
-dfm_f = filter_dfm(df_ops, dfm, region, dr)
-K = kpis(dfm_f)
-
 # =====================
 # Executive Overview
 # =====================
 st.subheader("Executive Overview")
 t1,t2,t3,t4,t5,t6 = st.columns(6)
 t1.metric("Avg Cost Reduction", f"{K['cost_red']:.1f}%")
-t2.metric("On-Time Delivery", f"{K['ontime']:.1f}%")
-t3.metric("TMS Adoption", f"{K['adopt']:.1f}%")
-t4.metric("Data Quality", f"{K['dq']:.1f}")
-t5.metric("Cumulative Savings", f"${K['cumsave']:,.0f}")
-t6.metric("Interface Uptime", f"{K['uptime']:.2f}%")
+t2.metric("On-Time Delivery", f"{K['ontime']:.1f}%", f"Target {target_ontime:.0f}%")
+t3.metric("TMS Adoption", f"{K['adopt']:.1f}%", f"Target {target_adoption:.0f}%")
+t4.metric("Data Quality", f"{K['dq']:.1f}", f"Target {target_dq:.0f}")
+t5.metric("Cumulative Savings", f"${K['cumsave']:,.0f}", f"{shipments_pm:,} shp/mo")
+t6.metric("Interface Uptime", f"{K['uptime']:.2f}%", f"MTTR≤{max_mttr:.0f}h")
 
 h1,h2,h3 = st.columns(3)
 with h1:
-    # Overall health RAG based on thresholds
-    cr = health_color(K['cost_red'], 10, 5)
-    ot = health_color(K['ontime'], 92, 88)
-    ad = health_color(K['adopt'], 80, 60)
-    dq = health_color(K['dq'], 85, 75)
-    st.markdown(f"**Program Health:** {cr} Cost | {ot} On‑Time | {ad} Adoption | {dq} Data Quality")
+    st.markdown(f"**Program Health:** "
+                f"{rag(K['cost_red'], 10, 5)} Cost | "
+                f"{rag(K['ontime'], target_ontime, target_ontime-4)} On‑Time | "
+                f"{rag(K['adopt'], target_adoption, target_adoption-20)} Adoption | "
+                f"{rag(K['dq'], target_dq, target_dq-10)} Data Quality")
 with h2:
-    # Milestone donut (percent complete vs roadmap tasks)
     completed = (df_gantt["Status"]=="Done").sum()
     inprog = (df_gantt["Status"]=="In Progress").sum()
     planned = (df_gantt["Status"]=="Planned").sum()
@@ -231,18 +259,19 @@ with h2:
     fig_donut.update_layout(title="Milestone Status")
     st.plotly_chart(fig_donut, use_container_width=True)
 with h3:
-    # Alerts
     latest = dfm_f.iloc[-1]
     alerts = []
-    if K['ontime'] < 88: alerts.append("On‑time below target 88%.")
-    if K['adopt'] < 60: alerts.append("Adoption below 60% in selected scope.")
-    if K['dq'] < 75: alerts.append("Data quality below 75%.")
-    if latest["Data_Freshness_Hours"] > 12: alerts.append("Data freshness > 12 hours.")
-    if latest["MTTR_Hours"] > 8: alerts.append("MTTR > 8 hours.")
-    if not alerts: alerts = ["All core indicators within thresholds."]
+    if K['ontime'] < target_ontime: alerts.append(f"On‑time below target ({K['ontime']:.1f}% < {target_ontime:.0f}%).")
+    if K['adopt'] < target_adoption: alerts.append(f"Adoption below target ({K['adopt']:.1f}% < {target_adoption:.0f}%).")
+    if K['dq'] < target_dq: alerts.append(f"Data Quality below target ({K['dq']:.1f} < {target_dq:.0f}).")
+    if latest['Data_Freshness_Hours'] > max_freshness: alerts.append(f"Data freshness > {max_freshness:.0f}h ({latest['Data_Freshness_Hours']:.1f}h).")
+    if latest['MTTR_Hours'] > max_mttr: alerts.append(f"MTTR > {max_mttr:.0f}h ({latest['MTTR_Hours']:.1f}h).")
     st.markdown("**Program Alerts**")
-    for a in alerts:
-        st.write("• " + a)
+    if not alerts:
+        st.success("All indicators within thresholds.")
+    else:
+        for a in alerts:
+            st.write("• " + a)
 
 st.markdown("---")
 
@@ -361,16 +390,10 @@ with e3:
 st.subheader("Forecast & Scenarios")
 s1, s2 = st.columns([1,1])
 with s1:
-    # Scenario sliders
-    st.markdown("**Assumptions**")
-    delta_route = st.slider("Route optimization impact (USD/shipment)", 0.0, 10.0, 3.0, 0.5)
-    delta_tender = st.slider("Auto-tender impact (USD/shipment)", 0.0, 8.0, 2.0, 0.5)
-    delta_dwell = st.slider("Dwell reduction impact (USD/shipment)", 0.0, 6.0, 1.5, 0.5)
     base_last = dfm_f["Cost_TMS"].iloc[-1] if len(dfm_f) else 100
     projected = base_last - (delta_route + delta_tender + delta_dwell)
     st.metric("Projected Cost per Shipment (Next Q)", f"${projected:,.2f}")
 with s2:
-    # Simple 6-month projection from last point + scenario deltas
     if len(dfm_f) > 0:
         future_months = [dfm_f["Month"].max() + pd.DateOffset(months=i) for i in range(1,7)]
         proj_vals = [max(projected + np.random.normal(0,0.8), 70) for _ in future_months]
@@ -380,4 +403,4 @@ with s2:
         fig_proj.update_layout(title="6-Month Cost Projection (Scenario)", yaxis_title="USD per Shipment", xaxis_title="Month")
         st.plotly_chart(fig_proj, use_container_width=True)
 
-st.caption(f"© {datetime.now().year} — Example executive cockpit with synthetic data.")
+st.caption(f"© {datetime.now().year} — Exec cockpit with sidebar controls and synthetic data.")
