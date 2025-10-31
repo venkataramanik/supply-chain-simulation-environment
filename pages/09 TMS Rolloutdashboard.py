@@ -300,6 +300,40 @@ with h3:
 
 st.markdown("---")
 
+
+# =====================
+# Diagnostics (optional)
+# =====================
+with st.expander("🔧 Diagnostics — show current inputs & computed KPIs", expanded=False):
+    st.write({
+        "region": region,
+        "date_range": (str(pd.to_datetime(dr[0]).date()), str(pd.to_datetime(dr[1]).date())),
+        "shipments_pm": shipments_pm,
+        "targets": {
+            "on_time": target_ontime,
+            "adoption": target_adoption,
+            "data_quality": target_dq,
+            "freshness_hours": max_freshness,
+            "mttr_max": max_mttr,
+        },
+        "scenario_usd_per_shipment": {
+            "route": delta_route, "tender": delta_tender, "dwell": delta_dwell
+        },
+        "computed": {
+            "avg_cost_reduction_pct": float(K["cost_red"]),
+            "on_time_pct_latest": float(K["ontime"]),
+            "adoption_pct_latest": float(K["adopt"]),
+            "data_quality_latest": float(K["dq"]),
+            "cumulative_savings": float(K["cumsave"]),
+            "uptime_latest": float(K["uptime"]),
+        },
+        "rows_in_scope": len(dfm_f),
+        "first_month": str(dfm_f["Month"].min().date()) if len(dfm_f)>0 else None,
+        "last_month": str(dfm_f["Month"].max().date()) if len(dfm_f)>0 else None,
+    })
+    if st.button("Recompute now"):
+        st.rerun()
+
 # =====================
 # Roadmap & Waves
 # =====================
